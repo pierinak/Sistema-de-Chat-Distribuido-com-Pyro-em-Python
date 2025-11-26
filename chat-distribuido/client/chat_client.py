@@ -1,6 +1,6 @@
 """
 Cliente do Chat Distribuído
-Interface para usuário se conectar e interagir
+Interface de linha de comando
 """
 
 import Pyro4
@@ -10,7 +10,6 @@ import time
 import threading
 from datetime import datetime
 
-# Adiciona pasta pai ao path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from common.models import Mensagem
@@ -21,69 +20,93 @@ from config.settings import (
 
 
 class ChatClient:
-    """Cliente do chat com interface de linha de comando"""
+    """Cliente do chat"""
     
     def __init__(self):
+        """Inicializa cliente"""
         self.servidor = None
         self.nome_usuario = None
         self.rodando = False
         self.ultima_msg_id = 0
+        self.conectado = False
     
     def conectar(self):
         """Conecta ao servidor via Name Server"""
-        try:
-            print("🔍 Localizando servidor...")
-            ns = Pyro4.locateNS()
-            uri = ns.lookup("chat.server")
-            self.servidor = Pyro4.Proxy(uri)
-            
-            # Testa conexão
-            if self.servidor.ping():
-                print("✅ Conectado ao servidor!\n")
-                return True
+        tentativas = 3
+        
+        for i in range(tentativas):
+            try:
+                print(f"🔍 Tentativa {i+1}/{tentativas}...")
+                ns = Pyro4.locateNS()
+                uri = ns.lookup("chat.server")
+                self.servidor = Pyro4.Proxy(uri)
                 
-        except Exception as e:
-            print(f"❌ Erro ao conectar: {e}")
-            print("\n💡 Certifique-se de que:")
-            print("   1. Name Server está rodando: python -m Pyro4.naming")
-            print("   2. Servidor está rodando: python server/start_server.py")
-            return False
+                if self.servidor.ping():
+                    print(f"{Colors.OKGREEN}✅ Conectado!{Colors.ENDC}\n")
+                    self.conectado = True
+                    return True
+                    
+            except Exception as e:
+                print(f"{Colors.WARNING}⚠️  Falhou: {e}{Colors.ENDC}")
+                if i < tentativas - 1:
+                    print("⏳ Aguardando...\n")
+                    time.sleep(2)
+        
+        print(f"\n{Colors.FAIL}❌ Não conectou{Colors.ENDC}")
+        print("\n💡 Verifique:")
+        print("   1. Name Server rodando")
+        print("   2. Servidor rodando")
+        return False
     
     def registrar(self):
         """Registra usuário no servidor"""
         print("="*60)
-        print("📝 REGISTRO")
+        print(f"{Colors.BOLD}📝 REGISTRO{Colors.ENDC}")
         print("="*60)
+        print(f"\n{Colors.OKCYAN}ℹ️  3-20 caracteres (letras, números, _){Colors.ENDC}")
         
-        while True:
-            nome = input("\n👤 Digite seu nome de usuário: ").strip()
+        tentativas = 0
+        max_tentativas = 3
+        
+        while tentativas < max_tentativas:
+            nome = input(f"\n{Colors.BOLD}👤 Nome:{Colors.ENDC} ").strip()
             
-            # Valida localmente
+            if not nome:
+                print(f"{Colors.WARNING}⚠️  Vazio{Colors.ENDC}")
+                continue
+            
             valido, msg = validar_username(nome)
             if not valido:
                 print(f"{Colors.FAIL}❌ {msg}{Colors.ENDC}")
+                tentativas += 1
                 continue
             
-            # Registra no servidor
             try:
                 sucesso, mensagem = self.servidor.registrar_usuario(nome)
                 
                 if sucesso:
                     self.nome_usuario = nome
-                    print(f"{Colors.OKGREEN}✅ {mensagem}{Colors.ENDC}")
+                    print(f"\n{Colors.OKGREEN}{mensagem}{Colors.ENDC}")
+                    time.sleep(1)
                     return True
                 else:
-                    print(f"{Colors.FAIL}❌ {mensagem}{Colors.ENDC}")
+                    print(f"{Colors.FAIL}{mensagem}{Colors.ENDC}")
+                    tentativas += 1
                     
             except Exception as e:
                 print(f"{Colors.FAIL}❌ Erro: {e}{Colors.ENDC}")
                 return False
+        
+        print(f"\n{Colors.FAIL}❌ Máximo de tentativas{Colors.ENDC}")
+        return False
     
     def receber_mensagens(self):
-        """Thread para receber mensagens do servidor"""
+        """Thread que recebe mensagens"""
+        erros = 0
+        max_erros = 5
+        
         while self.rodando:
             try:
-                # Busca novas mensagens
                 mensagens = self.servidor.obter_mensagens(
                     self.nome_usuario, 
                     self.ultima_msg_id
@@ -96,41 +119,50 @@ class ChatClient:
                     
                     self.ultima_msg_id += len(mensagens)
                 
-                time.sleep(0.5)  # Polling a cada 0.5s
+                erros = 0
+                time.sleep(0.5)
                 
             except Exception as e:
-                if self.rodando:
-                    print(f"\n{Colors.FAIL}❌ Erro ao receber mensagens: {e}{Colors.ENDC}")
+                erros += 1
+                
+                if erros >= max_erros:
+                    if self.rodando:
+                        print(f"\n{Colors.FAIL}❌ Conexão perdida{Colors.ENDC}")
+                        self.rodando = False
                     break
+                
+                time.sleep(1)
     
     def exibir_mensagem(self, msg):
         """Exibe mensagem formatada"""
         hora = msg.timestamp.strftime("%H:%M:%S")
         
-        # Define cor baseada no tipo
         if msg.tipo == "sistema":
             cor = Colors.OKCYAN
-            print(f"\r{cor}[{hora}] {msg.conteudo}{Colors.ENDC}")
+            texto = f"[{hora}] {msg.conteudo}"
             
         elif msg.tipo == "erro":
             cor = Colors.FAIL
-            print(f"\r{cor}[{hora}] ERRO: {msg.conteudo}{Colors.ENDC}")
+            texto = f"[{hora}] ⚠️  {msg.conteudo}"
             
         elif msg.remetente == self.nome_usuario:
-            # Mensagem própria
             cor = Colors.OKGREEN
-            print(f"\r{cor}[{hora}] Você: {msg.conteudo}{Colors.ENDC}")
+            texto = f"[{hora}] Você: {msg.conteudo}"
             
         else:
-            # Mensagem de outro usuário
             cor = Colors.OKBLUE
-            print(f"\r{cor}[{hora}] {msg.remetente}: {msg.conteudo}{Colors.ENDC}")
+            texto = f"[{hora}] {msg.remetente}: {msg.conteudo}"
         
-        # Reimprime prompt
-        print(f"\n{self.nome_usuario}> ", end="", flush=True)
+        print(f"\r{cor}{texto}{Colors.ENDC}")
+        print(f"{Colors.BOLD}{self.nome_usuario}>{Colors.ENDC} ", end="", flush=True)
     
     def enviar_mensagem(self, conteudo):
-        """Envia mensagem para o servidor"""
+        """Envia mensagem"""
+        valido, msg = validar_mensagem(conteudo)
+        if not valido:
+            print(f"{Colors.FAIL}❌ {msg}{Colors.ENDC}")
+            return
+        
         try:
             sucesso, mensagem = self.servidor.enviar_mensagem(
                 self.nome_usuario,
@@ -138,140 +170,183 @@ class ChatClient:
             )
             
             if not sucesso:
-                print(f"{Colors.FAIL}❌ {mensagem}{Colors.ENDC}")
+                print(f"{Colors.FAIL}{mensagem}{Colors.ENDC}")
                 
         except Exception as e:
-            print(f"{Colors.FAIL}❌ Erro ao enviar: {e}{Colors.ENDC}")
+            print(f"{Colors.FAIL}❌ Erro: {e}{Colors.ENDC}")
     
     def listar_usuarios(self):
         """Lista usuários online"""
         try:
             usuarios = self.servidor.obter_usuarios_online()
             
-            print(f"\n{Colors.BOLD}👥 USUÁRIOS ONLINE ({len(usuarios)}):{Colors.ENDC}")
+            print(f"\n{Colors.HEADER}{'='*50}{Colors.ENDC}")
+            print(f"{Colors.BOLD}👥 ONLINE ({len(usuarios)}){Colors.ENDC}")
+            print(f"{Colors.HEADER}{'='*50}{Colors.ENDC}\n")
+            
             for i, usuario in enumerate(usuarios, 1):
-                indicador = "👉" if usuario == self.nome_usuario else "  "
-                print(f"{indicador} {i}. {usuario}")
+                if usuario == self.nome_usuario:
+                    print(f"{Colors.OKGREEN}  👉 {i}. {usuario}{Colors.ENDC}")
+                else:
+                    print(f"{Colors.OKBLUE}     {i}. {usuario}{Colors.ENDC}")
+            
             print()
             
         except Exception as e:
             print(f"{Colors.FAIL}❌ Erro: {e}{Colors.ENDC}")
     
     def mostrar_historico(self):
-        """Mostra histórico de mensagens"""
+        """Mostra histórico"""
         try:
             mensagens = self.servidor.obter_historico(limite=20)
             
-            print(f"\n{Colors.BOLD}📜 HISTÓRICO (últimas 20 mensagens):{Colors.ENDC}\n")
+            print(f"\n{Colors.HEADER}{'='*50}{Colors.ENDC}")
+            print(f"{Colors.BOLD}📜 HISTÓRICO{Colors.ENDC}")
+            print(f"{Colors.HEADER}{'='*50}{Colors.ENDC}\n")
+            
+            if not mensagens:
+                print(f"{Colors.WARNING}  Vazio{Colors.ENDC}\n")
+                return
             
             for msg_dict in mensagens:
                 msg = Mensagem.from_dict(msg_dict)
-                self.exibir_mensagem(msg)
+                hora = msg.timestamp.strftime("%H:%M:%S")
+                
+                if msg.tipo == "sistema":
+                    print(f"{Colors.OKCYAN}  [{hora}] {msg.conteudo}{Colors.ENDC}")
+                else:
+                    print(f"  [{hora}] {msg.remetente}: {msg.conteudo}")
             
             print()
             
         except Exception as e:
             print(f"{Colors.FAIL}❌ Erro: {e}{Colors.ENDC}")
     
+    def mostrar_estatisticas(self):
+        """Mostra estatísticas"""
+        try:
+            stats = self.servidor.obter_estatisticas()
+            
+            print(f"\n{Colors.HEADER}{'='*50}{Colors.ENDC}")
+            print(f"{Colors.BOLD}📊 ESTATÍSTICAS{Colors.ENDC}")
+            print(f"{Colors.HEADER}{'='*50}{Colors.ENDC}\n")
+            
+            print(f"  👥 Online: {stats['usuarios_online']}")
+            print(f"  💬 Mensagens: {stats['total_mensagens']}")
+            print(f"  📈 Pico: {stats['pico_usuarios']}")
+            print(f"  ⏱️  Uptime: {stats['uptime_formatado']}")
+            print()
+            
+        except Exception as e:
+            print(f"{Colors.FAIL}❌ Erro: {e}{Colors.ENDC}")
+    
     def processar_comando(self, texto):
-        """Processa comandos especiais"""
-        if texto == "/help":
+        """Processa comandos"""
+        comando = texto.lower().strip()
+        
+        if comando == "/help":
             print(HELP_MESSAGE)
             
-        elif texto == "/users":
+        elif comando == "/users":
             self.listar_usuarios()
             
-        elif texto == "/history":
+        elif comando == "/history":
             self.mostrar_historico()
             
-        elif texto == "/clear":
+        elif comando == "/stats":
+            self.mostrar_estatisticas()
+            
+        elif comando == "/clear":
             os.system('clear' if os.name == 'posix' else 'cls')
             print(WELCOME_MESSAGE)
+            print(f"{Colors.OKGREEN}✅ Conectado: {self.nome_usuario}{Colors.ENDC}\n")
             
-        elif texto == "/quit":
+        elif comando == "/quit" or comando == "/exit":
+            print(f"\n{Colors.OKCYAN}👋 Saindo...{Colors.ENDC}")
             self.desconectar()
             return False
             
         else:
-            print(f"{Colors.FAIL}❌ Comando desconhecido. Use /help{Colors.ENDC}")
+            print(f"{Colors.FAIL}❌ Comando desconhecido{Colors.ENDC}")
+            print(f"{Colors.WARNING}💡 Use /help{Colors.ENDC}")
         
         return True
     
     def loop_principal(self):
-        """Loop de envio de mensagens"""
+        """Loop principal do chat"""
+        os.system('clear' if os.name == 'posix' else 'cls')
         print(WELCOME_MESSAGE)
-        print(f"{Colors.OKGREEN}✅ Conectado como: {self.nome_usuario}{Colors.ENDC}\n")
-        print("💡 Digite /help para ver comandos disponíveis\n")
+        print(f"{Colors.OKGREEN}✅ Conectado: {Colors.BOLD}{self.nome_usuario}{Colors.ENDC}")
+        print(f"{Colors.OKCYAN}💡 /help para comandos{Colors.ENDC}\n")
         
         self.rodando = True
         
-        # Inicia thread de recebimento
-        thread_receber = threading.Thread(target=self.receber_mensagens, daemon=True)
-        thread_receber.start()
+        thread = threading.Thread(target=self.receber_mensagens, daemon=True)
+        thread.start()
         
         try:
             while self.rodando:
                 try:
-                    texto = input(f"{self.nome_usuario}> ").strip()
+                    texto = input(f"{Colors.BOLD}{self.nome_usuario}>{Colors.ENDC} ").strip()
                     
                     if not texto:
                         continue
                     
-                    # Verifica se é comando
                     if texto.startswith('/'):
                         if not self.processar_comando(texto):
                             break
                     else:
-                        # Envia mensagem normal
                         self.enviar_mensagem(texto)
                 
                 except KeyboardInterrupt:
-                    print("\n\n⚠️  Interrompido pelo usuário")
+                    print(f"\n\n{Colors.WARNING}⚠️  Interrompido{Colors.ENDC}")
+                    break
+                except EOFError:
+                    print(f"\n\n{Colors.WARNING}⚠️  EOF{Colors.ENDC}")
                     break
                     
         finally:
             self.desconectar()
     
     def desconectar(self):
-        """Desconecta do servidor"""
+        """Desconecta"""
         if self.rodando:
             self.rodando = False
             
             try:
                 if self.servidor and self.nome_usuario:
                     self.servidor.desconectar_usuario(self.nome_usuario)
-                    print(f"\n{Colors.OKCYAN}👋 Desconectado do servidor{Colors.ENDC}")
+                    print(f"{Colors.OKCYAN}👋 Desconectado{Colors.ENDC}")
             except:
                 pass
     
     def iniciar(self):
-        """Inicia cliente completo"""
-        print("="*60)
-        print("💬 CLIENTE DO CHAT DISTRIBUÍDO")
-        print("="*60)
+        """Inicia cliente"""
+        print("\n" + "="*60)
+        print(f"{Colors.HEADER}{Colors.BOLD}💬 CLIENTE DO CHAT{Colors.ENDC}")
+        print("="*60 + "\n")
         
-        # Conecta ao servidor
         if not self.conectar():
             return
         
-        # Registra usuário
         if not self.registrar():
             return
         
-        # Entra no loop principal
         self.loop_principal()
 
 
 def main():
-    """Ponto de entrada do cliente"""
+    """Ponto de entrada"""
     cliente = ChatClient()
     
     try:
         cliente.iniciar()
     except Exception as e:
-        print(f"\n{Colors.FAIL}❌ Erro fatal: {e}{Colors.ENDC}")
+        print(f"\n{Colors.FAIL}❌ Erro: {e}{Colors.ENDC}")
+        import traceback
+        traceback.print_exc()
     finally:
-        print("\n✅ Cliente encerrado\n")
+        print(f"\n{Colors.OKGREEN}✅ Encerrado{Colors.ENDC}\n")
 
 
 if __name__ == "__main__":
