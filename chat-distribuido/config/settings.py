@@ -3,73 +3,77 @@ Configurações Globais do Sistema de Chat
 Centralizadas para facilitar manutenção
 """
 
+import re
+
 # ============================================================
 # CONFIGURAÇÕES DO SERVIDOR
 # ============================================================
 
-# Name Server
 NAMESERVER_HOST = "localhost"
 NAMESERVER_PORT = 9090
 
-# Servidor do Chat
 CHAT_SERVER_NAME = "chat.server"
-CHAT_SERVER_HOST = "0.0.0.0"  # Aceita conexões de qualquer IP
+CHAT_SERVER_HOST = "0.0.0.0"
 
 # ============================================================
 # LIMITES E SEGURANÇA
 # ============================================================
 
-# Limites de mensagens
 MAX_MESSAGE_LENGTH = 500
 MAX_USERNAME_LENGTH = 20
 MIN_USERNAME_LENGTH = 3
-
-# Taxa de mensagens (rate limiting)
 MAX_MESSAGES_PER_MINUTE = 30
-
-# Histórico
 MAX_HISTORY_SIZE = 100
-
-# Timeout
-CLIENT_TIMEOUT = 300  # 5 minutos de inatividade
+CLIENT_TIMEOUT = 300  # 5 minutos
 
 # ============================================================
-# CONFIGURAÇÕES DE LOGGING
+# POLLING
 # ============================================================
 
-LOG_LEVEL = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-LOG_FILE = "logs/chat.log"
-LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+POLLING_INTERVAL = 0.5
+MAX_RECONNECT_ATTEMPTS = 3
+RECONNECT_DELAY = 2
 
 # ============================================================
-# MENSAGENS DO SISTEMA
+# MENSAGENS
 # ============================================================
 
 WELCOME_MESSAGE = """
 ╔══════════════════════════════════════════════════════════╗
 ║          BEM-VINDO AO CHAT DISTRIBUÍDO PYRO4            ║
 ║                                                          ║
-║  Sistema de comunicação segura para sua empresa         ║
+║  🏢 Sistema de comunicação segura corporativa           ║
+║  🔒 Protocolo RPC com Pyro4                             ║
+║  💬 Chat em tempo real                                  ║
 ╚══════════════════════════════════════════════════════════╝
 """
 
 HELP_MESSAGE = """
-📋 COMANDOS DISPONÍVEIS:
+╔══════════════════════════════════════════════════════════╗
+║                  📋 COMANDOS DISPONÍVEIS                ║
+╚══════════════════════════════════════════════════════════╝
 
-/help     - Mostra esta mensagem de ajuda
-/users    - Lista todos os usuários online
-/history  - Mostra histórico de mensagens
-/clear    - Limpa a tela
-/quit     - Sair do chat
+  🔹 /help      - Mostra esta mensagem de ajuda
+  🔹 /users     - Lista todos os usuários online
+  🔹 /history   - Mostra histórico de mensagens
+  🔹 /stats     - Estatísticas do servidor
+  🔹 /clear     - Limpa a tela
+  🔹 /quit      - Sair do chat (/exit também funciona)
 
-💡 DICAS:
-- Mensagens começam automaticamente (sem comando)
-- Use Ctrl+C para sair rapidamente
-- Máximo de {max_len} caracteres por mensagem
-""".format(max_len=MAX_MESSAGE_LENGTH)
+╔══════════════════════════════════════════════════════════╗
+║                      💡 DICAS DE USO                     ║
+╚══════════════════════════════════════════════════════════╝
+
+  ✓ Mensagens começam automaticamente (sem comando)
+  ✓ Use Ctrl+C para sair rapidamente
+  ✓ Máximo de 500 caracteres por mensagem
+  ✓ Limite de 30 mensagens por minuto
+  ✓ Inatividade de 5 minutos = desconexão automática
+
+"""
 
 # ============================================================
-# CORES PARA TERMINAL (ANSI)
+# CORES ANSI
 # ============================================================
 
 class Colors:
@@ -95,12 +99,16 @@ def validar_username(username):
     Regras:
     - Entre 3 e 20 caracteres
     - Apenas letras, números e underscore
-    - Não pode começar com número
-    """
-    import re
+    - Deve começar com letra
     
+    Args:
+        username: Nome a validar
+        
+    Returns:
+        tuple: (bool, str) - (valido, mensagem)
+    """
     if not username:
-        return False, "Nome de usuário não pode ser vazio"
+        return False, "Nome não pode ser vazio"
     
     if len(username) < MIN_USERNAME_LENGTH:
         return False, f"Nome deve ter no mínimo {MIN_USERNAME_LENGTH} caracteres"
@@ -111,15 +119,32 @@ def validar_username(username):
     if not re.match(r'^[a-zA-Z][a-zA-Z0-9_]*$', username):
         return False, "Nome deve começar com letra e conter apenas letras, números e _"
     
+    palavras_proibidas = ['admin', 'root', 'sistema', 'server']
+    if username.lower() in palavras_proibidas:
+        return False, "Este nome não está disponível"
+    
     return True, "OK"
 
 
 def validar_mensagem(mensagem):
-    """Valida mensagem antes de enviar"""
+    """
+    Valida mensagem antes de enviar
+    
+    Args:
+        mensagem: Texto da mensagem
+        
+    Returns:
+        tuple: (bool, str) - (valido, mensagem)
+    """
     if not mensagem or not mensagem.strip():
         return False, "Mensagem não pode ser vazia"
     
     if len(mensagem) > MAX_MESSAGE_LENGTH:
         return False, f"Mensagem muito longa (máx: {MAX_MESSAGE_LENGTH} caracteres)"
+    
+    caracteres_proibidos = ['\0', '\r']
+    for char in caracteres_proibidos:
+        if char in mensagem:
+            return False, "Mensagem contém caracteres inválidos"
     
     return True, "OK"
