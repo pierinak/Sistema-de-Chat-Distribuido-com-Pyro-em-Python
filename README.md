@@ -1,11 +1,16 @@
 # 💬 Chat Distribuído com Pyro4
 
-Sistema de chat corporativo para comunicação interna segura usando RPC (Remote Procedure Call).
+Sistema de chat corporativo usando RPC (Remote Procedure Call) para comunicação interna segura.
+
+---
 
 ## 📋 Requisitos
 
 - Python 3.7+
 - Pyro4
+- VS Code (recomendado)
+
+---
 
 ## 🚀 Instalação
 
@@ -13,94 +18,245 @@ Sistema de chat corporativo para comunicação interna segura usando RPC (Remote
 pip install -r requirements.txt
 ```
 
+---
+
 ## ▶️ Como Executar
 
-### Passo 1: Iniciar o Name Server
-Abra um terminal e execute:
+### 🎯 Método 1: Launcher Automático (Recomendado)
+
+```bash
+python launcher.py
+```
+
+O launcher irá:
+1. Verificar dependências
+2. Iniciar Name Server
+3. Iniciar Servidor
+4. Permitir iniciar clientes
+
+### 📝 Método 2: Manual
+
+**Terminal 1 - Name Server:**
 ```bash
 python -m Pyro4.naming
 ```
 
-### Passo 2: Iniciar o Servidor do Chat
-Abra outro terminal e execute:
+**Terminal 2 - Servidor:**
 ```bash
 python -m server.start_server
 ```
 
-### Passo 3: Iniciar Clientes
-Abra quantos terminais quiser (um para cada cliente) e execute:
+**Terminal 3+ - Clientes:**
 ```bash
 python -m client.start_client
 ```
 
-## 📁 Estrutura do Projeto
+---
+
+## 📁 Estrutura
 
 ```
 chat-distribuido/
 ├── client/
 │   ├── __init__.py
-│   ├── chat_client.py      # Implementação do cliente
-│   └── start_client.py     # Script para iniciar cliente
+│   ├── chat_client.py       # Cliente
+│   └── start_client.py      # Inicializador
+│
 ├── server/
 │   ├── __init__.py
-│   ├── chat_server.py      # Implementação do servidor
-│   └── start_server.py     # Script para iniciar servidor
+│   ├── chat_server.py       # Servidor
+│   └── start_server.py      # Inicializador
+│
 ├── common/
 │   ├── __init__.py
-│   ├── models.py           # Modelos compartilhados (Mensagem)
-│   └── utils.py            # Utilitários compartilhados
+│   ├── models.py            # Modelo Mensagem
+│   └── utils.py             # Utilitários
+│
 ├── config/
 │   ├── __init__.py
-│   └── settings.py         # Configurações globais
-├── requirements.txt        # Dependências Python
-└── README.md              # Este arquivo
+│   └── settings.py          # Configurações
+│
+├── launcher.py              # Launcher
+├── requirements.txt         # Dependências
+└── README.md               # Documentação
 ```
 
-## 🎯 Funcionalidades Implementadas
+---
 
-✅ **Registro de usuários** com validação de nome  
-✅ **Envio e recebimento de mensagens** em tempo real  
-✅ **Broadcast automático** para todos os clientes conectados  
-✅ **Histórico de mensagens** (últimas 100)  
-✅ **Lista de usuários online** atualizada  
-✅ **Comandos especiais** do sistema  
-✅ **Detecção de inatividade** e desconexão automática  
-✅ **Rate limiting** para prevenir spam  
-✅ **Validações de segurança** em mensagens e nomes  
+## 🎯 Funcionalidades
 
-## 🔧 Comandos Disponíveis no Chat
+### ✅ Básicas
+- Registro de usuários
+- Envio/recebimento de mensagens
+- Broadcast automático
+- Histórico (100 mensagens)
+- Lista de usuários online
+- Comandos do sistema
 
-- `/help` - Mostra mensagem de ajuda
-- `/users` - Lista todos os usuários online
-- `/history` - Mostra histórico de mensagens
-- `/clear` - Limpa a tela do terminal
-- `/quit` - Sair do chat
+### 🆕 Avançadas
+- Rate limiting (30 msg/min)
+- Detecção de inatividade (5 min)
+- Reconexão automática
+- Estatísticas em tempo real
+- Validações de segurança
+- Interface colorida
+
+---
+
+## 🔧 Comandos do Chat
+
+| Comando | Descrição |
+|---------|-----------|
+| `/help` | Ajuda |
+| `/users` | Usuários online |
+| `/history` | Histórico |
+| `/stats` | Estatísticas |
+| `/clear` | Limpa tela |
+| `/quit` ou `/exit` | Sair |
+
+---
 
 ## 🏗️ Arquitetura
 
-O sistema utiliza **arquitetura Cliente/Servidor** com **RPC via Pyro4**:
+```
+┌─────────────┐
+│ Name Server │  ← Descoberta de serviços
+└──────┬──────┘
+       │
+  ┌────┴────┬────────┐
+  │         │        │
+Cliente  Cliente  Cliente
+  │         │        │
+  └─────────┼────────┘
+            │
+      ┌─────▼─────┐
+      │  Servidor │  ← Gerencia tudo
+      └───────────┘
+```
 
-1. **Name Server (Pyro4)**: Serviço de registro e descoberta
-2. **Servidor Central**: Gerencia usuários, mensagens e broadcast
-3. **Clientes**: Interface de usuário para enviar/receber mensagens
+**Componentes:**
+1. **Name Server**: Registro e descoberta
+2. **Servidor Central**: Gerencia usuários e mensagens
+3. **Clientes**: Interface de chat
 
-## 🔐 Recursos de Segurança
+---
 
-- Validação de nomes de usuário (3-20 caracteres)
-- Limite de tamanho de mensagens (500 caracteres)
-- Rate limiting (30 mensagens por minuto)
-- Timeout de inatividade (5 minutos)
+## 🔐 Segurança
+
+- Validação de username (3-20 chars)
+- Limite de mensagem (500 chars)
+- Rate limiting (30 msg/min)
+- Timeout de inatividade (5 min)
 - Sanitização de inputs
+- Nomes proibidos
 
-## 👥 Conceitos de Sistemas Distribuídos Aplicados
+---
 
-- **RPC (Remote Procedure Call)** via Pyro4
-- **Name Server** para descoberta de serviços
-- **Comunicação Cliente/Servidor**
-- **Broadcast de mensagens**
-- **Sincronização com locks**
-- **Threading** para recepção assíncrona
+## 👥 Conceitos Distribuídos
 
-## 📝 Autor
+- ✅ RPC via Pyro4
+- ✅ Name Server
+- ✅ Cliente/Servidor
+- ✅ Broadcast
+- ✅ Sincronização (locks)
+- ✅ Threading
+- ✅ Polling
+- ✅ Tratamento de falhas
 
-Projeto desenvolvido para disciplina de Sistemas Distribuídos
+---
+
+## 🐛 Troubleshooting
+
+**"Name Server not found"**
+```bash
+python -m Pyro4.naming
+```
+
+**"Connection refused"**
+- Verifique firewall
+- Servidor rodando?
+
+**"Nome já em uso"**
+- Escolha outro nome
+
+---
+
+## 📊 Estatísticas
+
+Use `/stats` para ver:
+- Usuários online
+- Total de mensagens
+- Pico de usuários
+- Tempo ativo
+
+---
+
+## 🎓 Requisitos Acadêmicos
+
+### ✅ Atendidos
+
+**Cliente/Servidor:**
+- Servidor gerencia tudo
+- Clientes via RPC
+
+**Funcionalidades:**
+- Registro ✔️
+- Envio ✔️
+- Recebimento ✔️
+- Broadcast ✔️
+
+**Pyro4:**
+- Name Server ✔️
+- Objetos remotos ✔️
+- Proxy ✔️
+
+**Conceitos:**
+- RPC ✔️
+- Sincronização ✔️
+- Threading ✔️
+- Falhas ✔️
+
+---
+
+## 💻 Tecnologias
+
+- Python 3.x
+- Pyro4 (RPC)
+- Threading
+- ANSI Colors
+
+---
+
+## 📝 Notas
+
+- **Compatível:** Windows, Linux, macOS
+- **IDE:** VS Code
+- **Testado:** Python 3.8+
+- **Capacidade:** 50+ clientes
+
+---
+
+## 🎯 Roadmap
+
+- [ ] Mensagens privadas
+- [ ] Salas/canais
+- [ ] Banco de dados
+- [ ] GUI
+- [ ] Criptografia
+- [ ] Autenticação
+
+---
+
+## 📄 Licença
+
+Projeto acadêmico - Sistemas Distribuídos
+
+---
+
+## 👨‍💻 Autor
+
+Desenvolvido para disciplina de Sistemas Distribuídos
+
+---
+
+**⭐ Dê uma estrela se foi útil!**
