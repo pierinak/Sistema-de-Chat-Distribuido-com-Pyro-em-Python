@@ -1,17 +1,19 @@
 """
 Servidor de Chat Distribuído usando Pyro4
-Gerencia usuários, mensagens, histórico e broadcast
+Gerencia usuários, mensagens e broadcast
 """
 
 import Pyro4
 import threading
 import time
 from datetime import datetime
+from collections import defaultdict
 
 from config.settings import (
     CHAT_SERVER_NAME,
     MAX_HISTORY_SIZE,
     CLIENT_TIMEOUT,
+    MAX_MESSAGES_PER_MINUTE,
     validar_mensagem,
     validar_username,
 )
@@ -24,98 +26,195 @@ class ChatServer:
     """Servidor principal do chat"""
 
     def __init__(self):
-        self.usuarios = {}   # nome → timestamp da última atividade
-        self.mensagens = []  # lista de Mensagem
+        """Inicializa o servidor"""
+        self.usuarios = {}  # nome -> timestamp última atividade
+        self.mensagens = []  # lista de objetos Mensagem
         self.lock = threading.Lock()
+        
+        # Rate limiting por usuário
+        self.message_timestamps = defaultdict(list)
+        
+        # Estatísticas
+        self.stats = {
+            'total_messages': 0,
+            'total_users': 0,
+            'peak_users': 0,
+            'start_time': datetime.now()
+        }
 
-        # Thread de limpeza
-        self.limpeza_thread = threading.Thread(target=self._limpar_inativos, daemon=True)
+        # Inicia thread de limpeza
+        self.limpeza_thread = threading.Thread(
+            target=self._limpar_inativos, 
+            daemon=True
+        )
         self.limpeza_thread.start()
-
-    # -------------------------------
-    # Funções básicas
-    # -------------------------------
+        
+        print("✅ Servidor inicializado")
 
     def ping(self):
-        """Usado pelo cliente para verificar disponibilidade"""
+        """Verifica se servidor está ativo"""
         return True
 
     def registrar_usuario(self, nome):
-        """Registra novo usuário"""
+        """
+        Registra novo usuário
+        
+        Args:
+            nome: Nome do usuário
+            
+        Returns:
+            tuple: (sucesso, mensagem)
+        """
         valido, msg = validar_username(nome)
         if not valido:
             return False, msg
 
         with self.lock:
             if nome in self.usuarios:
-                return False, "Nome já está em uso"
+                return False, "❌ Nome já em uso"
 
             self.usuarios[nome] = time.time()
+            self.stats['total_users'] += 1
+            self.stats['peak_users'] = max(
+                self.stats['peak_users'], 
+                len(self.usuarios)
+            )
 
-            # Mensagem de sistema
             self._registrar_sistema(f"🔵 {nome} entrou no chat")
+            
+            print(f"[REGISTRO] '{nome}' conectado. Online: {len(self.usuarios)}")
 
-        return True, "Usuário registrado com sucesso"
+        return True, f"✅ Bem-vindo, {nome}!"
 
     def desconectar_usuario(self, nome):
-        """Remove usuário do servidor"""
+        """
+        Remove usuário
+        
+        Args:
+            nome: Nome do usuário
+        """
         with self.lock:
             if nome in self.usuarios:
                 del self.usuarios[nome]
                 self._registrar_sistema(f"🔴 {nome} saiu do chat")
-
-    # -------------------------------
-    # Mensagens
-    # -------------------------------
+                
+                if nome in self.message_timestamps:
+                    del self.message_timestamps[nome]
+                
+                print(f"[SAÍDA] '{nome}' desconectado. Online: {len(self.usuarios)}")
 
     def enviar_mensagem(self, remetente, conteudo):
-        """Recebe e armazena mensagens dos clientes"""
+        """
+        Recebe mensagem do cliente
+        
+        Args:
+            remetente: Nome do remetente
+            conteudo: Texto da mensagem
+            
+        Returns:
+            tuple: (sucesso, mensagem)
+        """
         valido, msg = validar_mensagem(conteudo)
         if not valido:
             return False, msg
+        
+        # Rate limiting
+        agora = time.time()
+        with self.lock:
+            # Remove timestamps antigos
+            self.message_timestamps[remetente] = [
+                ts for ts in self.message_timestamps[remetente]
+                if agora - ts < 60
+            ]
+            
+            # Verifica limite
+            if len(self.message_timestamps[remetente]) >= MAX_MESSAGES_PER_MINUTE:
+                return False, f"⚠️ Limite de {MAX_MESSAGES_PER_MINUTE} msg/min"
+            
+            self.message_timestamps[remetente].append(agora)
 
-        msg = Mensagem(remetente, conteudo, datetime.now())
+        # Cria mensagem
+        msg_obj = Mensagem(remetente, conteudo, datetime.now())
 
         with self.lock:
-            self.usuarios[remetente] = time.time()  # Atualiza atividade
-            self.mensagens.append(msg)
+            self.usuarios[remetente] = time.time()
+            self.mensagens.append(msg_obj)
+            self.stats['total_messages'] += 1
 
-            # mantém o histórico limitado
+            # Limita histórico
             if len(self.mensagens) > MAX_HISTORY_SIZE:
                 self.mensagens = self.mensagens[-MAX_HISTORY_SIZE:]
 
-        return True, "Mensagem enviada"
+        return True, "✅ Enviada"
 
     def obter_mensagens(self, usuario, ultimo_id):
-        """Retorna mensagens novas a partir de um índice"""
+        """
+        Retorna novas mensagens
+        
+        Args:
+            usuario: Nome do usuário
+            ultimo_id: ID da última mensagem recebida
+            
+        Returns:
+            list: Lista de dicionários com mensagens
+        """
         with self.lock:
-            self.usuarios[usuario] = time.time()
+            if usuario in self.usuarios:
+                self.usuarios[usuario] = time.time()
+            
             novas = self.mensagens[ultimo_id:]
             return [msg.to_dict() for msg in novas]
 
     def obter_historico(self, limite=20):
-        """Retorna as últimas 'limite' mensagens"""
+        """
+        Retorna histórico de mensagens
+        
+        Args:
+            limite: Número de mensagens
+            
+        Returns:
+            list: Lista de mensagens
+        """
         with self.lock:
             return [m.to_dict() for m in self.mensagens[-limite:]]
 
     def obter_usuarios_online(self):
-        """Retorna lista de usuários ativos"""
+        """
+        Retorna lista de usuários online
+        
+        Returns:
+            list: Nomes dos usuários
+        """
         with self.lock:
-            return list(self.usuarios.keys())
-
-    # -------------------------------
-    # Suporte
-    # -------------------------------
+            return sorted(list(self.usuarios.keys()))
+    
+    def obter_estatisticas(self):
+        """
+        Retorna estatísticas do servidor
+        
+        Returns:
+            dict: Estatísticas
+        """
+        with self.lock:
+            uptime = datetime.now() - self.stats['start_time']
+            return {
+                'usuarios_online': len(self.usuarios),
+                'total_mensagens': self.stats['total_messages'],
+                'total_usuarios_historico': self.stats['total_users'],
+                'pico_usuarios': self.stats['peak_users'],
+                'uptime_segundos': uptime.total_seconds(),
+                'uptime_formatado': str(uptime).split('.')[0]
+            }
 
     def _registrar_sistema(self, texto):
-        """Insere mensagem de sistema"""
+        """Adiciona mensagem de sistema"""
         m = Mensagem("Sistema", texto, datetime.now(), tipo="sistema")
         self.mensagens.append(m)
 
     def _limpar_inativos(self):
-        """Remove usuários que ficaram tempo demais sem enviar nada"""
+        """Thread que remove usuários inativos"""
         while True:
-            time.sleep(5)
+            time.sleep(30)
             agora = time.time()
 
             with self.lock:
@@ -123,27 +222,47 @@ class ChatServer:
                     u for u, ts in self.usuarios.items()
                     if agora - ts > CLIENT_TIMEOUT
                 ]
+                
                 for u in remover:
                     del self.usuarios[u]
-                    self._registrar_sistema(f"⚠️ {u} desconectado por inatividade")
+                    self._registrar_sistema(f"⚠️ {u} desconectado (inatividade)")
+                    print(f"[TIMEOUT] '{u}' removido")
+                    
+                    if u in self.message_timestamps:
+                        del self.message_timestamps[u]
 
 
 def main():
-    """Inicia servidor e registra no NameServer"""
-    print("🚀 Iniciando servidor do Chat...")
+    """Inicia o servidor"""
+    print("\n" + "="*60)
+    print("🚀 SERVIDOR DO CHAT DISTRIBUÍDO")
+    print("="*60 + "\n")
 
-    daemon = Pyro4.Daemon()
-    ns = Pyro4.locateNS()
+    try:
+        print("📡 Conectando ao Name Server...")
+        daemon = Pyro4.Daemon()
+        ns = Pyro4.locateNS()
+        
+        print("🔧 Criando servidor...")
+        server = ChatServer()
 
-    server = ChatServer()
+        print("📝 Registrando no Name Server...")
+        uri = daemon.register(server)
+        ns.register(CHAT_SERVER_NAME, uri)
 
-    uri = daemon.register(server)
-    ns.register(CHAT_SERVER_NAME, uri)
+        print(f"\n✅ Servidor: {CHAT_SERVER_NAME}")
+        print(f"📍 URI: {uri}")
+        print("\n" + "="*60)
+        print("🟢 SERVIDOR ATIVO - Aguardando conexões")
+        print("="*60 + "\n")
+        print("💡 Ctrl+C para encerrar\n")
 
-    print(f"Servidor registrado como: {CHAT_SERVER_NAME}")
-    print("Aguardando conexões...\n")
-
-    daemon.requestLoop()
+        daemon.requestLoop()
+        
+    except Exception as e:
+        print(f"\n❌ Erro: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
