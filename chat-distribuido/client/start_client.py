@@ -1,6 +1,5 @@
 """
-Script de inicialização do cliente de chat
-Ponto de entrada principal para o cliente
+Script de inicialização do cliente
 """
 
 import sys
